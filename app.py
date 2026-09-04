@@ -1,104 +1,85 @@
-import os
-import json
 import streamlit as st
-from groq import Groq
+from openai import OpenAI
+import os
 
-# ----------------------------
-# Page setup
-# ----------------------------
-st.set_page_config(page_title="AI Content Assistant", page_icon="✨", layout="centered")
-st.title("✨ AI Content Assistant")
-st.caption("Generate a ready-to-post caption + hashtags in seconds.")
+# --- Page setup ---
+st.set_page_config(page_title="AI Content Assistant", page_icon="✍️")
+st.title("✍️ AI Content Assistant")
+st.markdown("Generate tailored posts for any platform, audience, and tone.")
 
-# ----------------------------
-# Groq API key handling
-# Priority: Streamlit secrets -> environment variable -> manual sidebar input
-# ----------------------------
-api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
-
+# --- Sidebar: User inputs ---
 with st.sidebar:
-    st.header("Settings")
-    if not api_key:
-        api_key = st.text_input("Groq API Key", type="password",
-                                 help="Get a free key at console.groq.com")
-    st.markdown("[Get a free Groq API key](https://console.groq.com/keys)")
-    model = st.selectbox(
-        "Model",
-        ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-        help="Free Groq models. Check console.groq.com/docs/models for the latest list."
+    st.header("Content Parameters")
+    content_type = st.selectbox(
+        "Content Type",
+        ["Blog Post", "Social Media Post", "Article", "Email", "Ad Copy"]
     )
-
-# ----------------------------
-# Content form
-# ----------------------------
-content_type = st.selectbox(
-    "Content Type",
-    ["Social Media Post", "Product Description", "Blog Intro", "Ad Copy", "Email Newsletter"]
-)
-platform = st.selectbox(
-    "Platform",
-    ["Instagram", "Twitter / X", "LinkedIn", "Facebook", "TikTok", "YouTube", "General / Website"]
-)
-topic = st.text_input("Topic", placeholder="e.g. Launching our new eco-friendly water bottle")
-target_audience = st.text_input("Target Audience", placeholder="e.g. Young professionals who care about sustainability")
-tone = st.selectbox(
-    "Tone",
-    ["Professional", "Casual", "Funny", "Inspirational", "Persuasive", "Informative"]
-)
-
-generate = st.button("Generate Content", type="primary", use_container_width=True)
-
-# ----------------------------
-# Generation logic
-# ----------------------------
-def build_prompt():
-    return f"""You are a social media copywriter. Create content with these details:
-
-- Content type: {content_type}
-- Platform: {platform}
-- Topic: {topic}
-- Target audience: {target_audience}
-- Tone: {tone}
-
-Respond ONLY with valid JSON in this exact format, no extra text:
-{{
-  "caption": "the full post caption/copy, written for the platform above",
-  "hashtags": ["#tag1", "#tag2", "#tag3"]
-}}
-Include 8-12 relevant, specific hashtags."""
-
-
-def generate_content():
-    client = Groq(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": build_prompt()}],
-        temperature=0.8,
+    platform = st.selectbox(
+        "Platform",
+        ["LinkedIn", "Twitter", "Instagram", "Facebook", "Blog"]
     )
-    raw = response.choices[0].message.content.strip()
-    # Models sometimes wrap JSON in code fences - strip those if present
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    return json.loads(raw)
+    topic = st.text_input("Topic", placeholder="e.g., AI in healthcare")
+    target_audience = st.text_input(
+        "Target Audience", placeholder="e.g., healthcare professionals"
+    )
+    tone = st.selectbox(
+        "Tone",
+        ["Professional", "Casual", "Humorous", "Inspirational", "Formal"]
+    )
+    generate_button = st.button("🚀 Generate Content")
 
-
-if generate:
-    if not api_key:
-        st.error("Please add your Groq API key in the sidebar first.")
-    elif not topic:
-        st.error("Please enter a topic.")
+# --- Main area ---
+if generate_button:
+    if not topic:
+        st.warning("Please enter a topic.")
     else:
-        with st.spinner("Generating your content..."):
-            try:
-                result = generate_content()
-                st.subheader("📝 Caption")
-                st.text_area("Caption", value=result["caption"], height=180, label_visibility="collapsed")
+        # --- Read all configuration from secrets / environment ---
+        api_key = st.secrets.get("API_KEY") or os.getenv("API_KEY")
+        base_url = st.secrets.get("BASE_URL") or os.getenv(
+            "BASE_URL", "https://api.groq.com/openai/v1")
+        model = st.secrets.get("MODEL") or os.getenv(
+            "MODEL", "llama-3.3-70b-versatile")
 
-                st.subheader("🏷️ Hashtags")
-                hashtags_str = " ".join(result["hashtags"])
-                st.text_area("Hashtags", value=hashtags_str, height=100, label_visibility="collapsed")
+        if not api_key:
+            st.error(
+                "API key not found. "
+                "Please set it in Streamlit secrets or as an environment variable."
+            )
+        else:
+            with st.spinner("Crafting your content..."):
+                try:
+                    # --- Initialize the client (works with DeepSeek, Groq, OpenAI, etc.) ---
+                    client = OpenAI(api_key=api_key, base_url=base_url)
 
-                st.success("Done! Copy the text above from the boxes.")
-            except json.JSONDecodeError:
-                st.error("The model returned an unexpected format. Please try again.")
-            except Exception as e:
-                st.error(f"Something went wrong: {e}")
+                    # --- Build the prompt ---
+                    prompt = f"""
+Generate a {content_type} for {platform} on the topic: "{topic}".
+Target audience: {target_audience}.
+Tone: {tone}.
+
+Provide the full content with:
+- A compelling caption/headline
+- The main body
+- A set of relevant hashtags
+
+Format the output clearly with these sections.
+"""
+
+                    # --- Call the API ---
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system",
+                                "content": "You are an expert content creator."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=800
+                    )
+
+                    content = response.choices[0].message.content
+                    st.markdown("### ✨ Generated Content")
+                    st.write(content)
+
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
